@@ -17,7 +17,8 @@ scrs <- read.csv('ignore/CSCI_raw.csv', header = T, stringsAsFactors = F) %>%
     long = New_Long
   ) %>% 
   mutate(
-    SampleDate = dmy(SampleDate)
+    SampleDate = dmy(SampleDate), 
+    COMID = as.character(COMID)
   )
   
 save(scrs, file = 'data/scrs.RData', compress = 'xz')

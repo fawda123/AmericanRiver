@@ -239,20 +239,10 @@ site_exp <- function(datin, scrs, thrsh = 0.79, tails = 0.05, lbs = list('over p
 #' @param thrsh numeric for CSCI scoring thresholds
 #' @param tails numeric for tails to truncate expectations for overlap with thrsh
 #' @param obs_sc logical if observed score text qualifiers are returned
-#'
+#' @param get_cds logical indicating if three level codes as list is returned
 #' @details  The three level codes for type are (0, 1, 2), (0, 1, 2), and (0, 1).  The first level is likely unconstrained (0), undetermined (1), and likely constrained (2); the second level is under-performing (0), as expected (1), and over-performing (2); the third level is below threshold (0) and above threshold (1)
-typ_lbs <- function(vec, thrsh = 0.79, tails = 0.05, obs_sc = FALSE){
+typ_lbs <- function(vec = NULL, thrsh = 0.79, tails = 0.05, obs_sc = FALSE, get_cds = FALSE){
 
-  # kill NA entries
-  vec <- ifelse(grepl('NA', vec), NA, vec)
-  
-  # get tails in chr format
-  lovl <- 100 * tails
-  hivl <- 100 * (1 -  tails) 
-  vls <- c(lovl, hivl) %>% 
-    round(., 0) %>% 
-    paste0(., 'th')
-  
   # type labels from codes in vec
   lbs <- list(
     Type01 = '0_2_1', 
@@ -269,9 +259,21 @@ typ_lbs <- function(vec, thrsh = 0.79, tails = 0.05, obs_sc = FALSE){
     Type12 = '2_0_0'
   )
   
+  if(get_cds) return(lbs)
+  
+  # kill NA entries
+  vec <- ifelse(grepl('NA', vec), NA, vec)
+  
+  # get tails in chr format
+  lovl <- 100 * tails
+  hivl <- 100 * (1 -  tails) 
+  vls <- c(lovl, hivl) %>% 
+    round(., 0) %>% 
+    paste0(., 'th')
+  
   # subset lbs by those in vec
   lbs <- unique(vec) %>% 
-    na.omit %>% 
+    na.omit %>%
     match(unlist(lbs)) %>% 
     lbs[.] %>% 
     .[sort(names(.))]
@@ -308,4 +310,64 @@ typ_lbs <- function(vec, thrsh = 0.79, tails = 0.05, obs_sc = FALSE){
 
   return(vec)
   
+}
+
+#' Summarize data from site_exp by counts and all types, used for table in app
+#'
+#' @param datin output data.frame from site_exp
+#' @param thrsh numeric for CSCI scoring thresholds
+#' @param tails numeric for tails to truncate expectations for overlap with thrsh
+#' @param obs_sc logical if observed score text qualifiers are returned
+#' @param lbs_str chr string labels for stream comid expectation as likely constrained, undetermind, and likely unconstrained
+#' @param lbs_sta chr string labels for site/station performance as over, expected, or under performing
+get_tab <- function(datin, thrsh = 0.79, tails = 0.05, lbs_str = list('likely constrained' = 2, 'undetermined' = 1, 'likely unconstrained' = 0), lbs_sta = list('over performing' = 2, 'expected' = 1, 'under performing' = 0)){ 
+
+  # typeoc labels
+  typeoc <- typ_lbs(get_cds = T) %>% 
+    unlist %>% 
+    typ_lbs(., thrsh = thrsh, tails = tails, obs_sc = T)
+  
+  # type labels from codes
+  lbs <- typ_lbs(get_cds = T) %>%
+    enframe('typelv', 'codes') %>%
+    unnest %>%
+    separate(codes, c('strcls', 'perf', 'thrsh'), sep = '_', remove = FALSE) %>% 
+    mutate(
+      typelv = factor(typelv, levels = typelv),
+      strcls = factor(strcls, levels = unlist(lbs_str), labels = names(lbs_str)),
+      perf = factor(perf, levels = unlist(lbs_sta), labels = names(lbs_sta))
+    ) %>% 
+    mutate(typeoc = typeoc) %>% 
+    dplyr::select(-codes, -thrsh)
+
+  # get type levels and convert all to character
+  lvs <- levels(lbs$typelv)
+  lbs <- lbs %>% 
+    mutate_all(as.character)
+  
+  # types from observed data, join with complete table
+  totab <- datin %>%
+    dplyr::select(strcls, perf, typeoc, typelv) %>%
+    group_by(strcls, perf, typeoc, typelv) %>%
+    summarise(Sites = n()) %>%
+    na.omit %>%
+    ungroup %>% 
+    mutate_all(as.character) %>% 
+    left_join(lbs, ., by = c('strcls', 'perf', 'typeoc', 'typelv')) %>% 
+    mutate(
+      Sites = ifelse(is.na(Sites), 0, Sites), 
+      typelv = factor(typelv, levels = lvs)
+      ) %>% 
+    arrange(`typelv`) %>%
+    rename(
+      `Reach expectation` = strcls,
+      `Site performance` = perf,
+      `Observed score` = typeoc,
+      Type = typelv
+    ) %>%
+    mutate(Type = gsub('^Type|^Type0', '', Type)) %>% 
+    dplyr::select(`Reach expectation`, `Site performance`, `Observed score`, Type, Sites)
+  
+  return(totab)
+
 }
